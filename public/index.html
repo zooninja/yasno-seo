@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="bg">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ясно SEO</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="#audit" aria-label="ясно.seo, към началото"><span class="logo" aria-hidden="true"></span><span>ясно<span class="tld">.seo</span></span></a>
+    <nav aria-label="Модули">
+      <button data-view="audit">Одит на сайт</button>
+      <button data-view="ranks">Позиции в Google</button>
+      <button data-view="gsc">Search Console</button>
+      <button data-view="outreach">Линк билдинг</button>
+      <button data-view="settings">Настройки</button>
+    </nav>
+    <div class="textsize" role="group" aria-label="Размер на текста">
+      <span>Текст</span>
+      <button class="small" id="fs-down" aria-label="По-малък текст">A−</button>
+      <button class="small" id="fs-up" aria-label="По-голям текст">A+</button>
+    </div>
+  </header>
+  <main id="app" tabindex="-1"></main>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
