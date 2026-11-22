@@ -38,6 +38,12 @@ export function realLink(r) {
   try {
     if (!/(^|\.)google\.[a-z.]+$/i.test(new URL(r.link).hostname)) return r.link;
   } catch {}
+  // пренасочване на Google от вида /url?q=<истински адрес>
+  try {
+    const u = new URL(r.link);
+    const real = u.searchParams.get('q') || u.searchParams.get('url');
+    if (real && /^https?:\/\//.test(real) && !/(^|\.)google\.[a-z.]+$/i.test(new URL(real).hostname)) return real;
+  } catch {}
   const shown = (r.displayed_link || '').split(' › ')[0].trim();
   if (!shown) return r.link;
   try { return new URL(/^https?:\/\//.test(shown) ? shown : 'https://' + shown).origin + '/'; } catch { return r.link; }
@@ -107,7 +113,7 @@ async function checkKeyword(key, q, p) {
     for (const raw of results) {
       const r = { ...raw, link: realLink(raw) };
       pos++;
-      if (out.top.length < 10) out.top.push({ position: pos, title: r.title, link: r.link });
+      if (out.top.length < 10) out.top.push({ position: pos, title: r.title, link: r.link, snippet: r.snippet || null, date: r.date || null, approx: r.link !== raw.link && /^https?:\/\/[^/]+\/$/.test(r.link || '') && (raw.displayed_link || '').includes('›') });
       if (out.position == null && hostMatches(r.link, p.domain)) { out.position = pos; out.url = r.link; out.title = r.title; }
       for (const c of want) if (!out.competitors[c] && hostMatches(r.link, c)) out.competitors[c] = { position: pos, url: r.link };
     }

@@ -12,11 +12,11 @@
   <header>
     <a class="brand" href="#audit" aria-label="ясно.seo, към началото"><span class="logo" aria-hidden="true"></span><span>ясно<span class="tld">.seo</span></span></a>
     <nav aria-label="Модули">
-      <button data-view="audit">Одит на сайт</button>
-      <button data-view="ranks">Позиции в Google</button>
-      <button data-view="gsc">Search Console</button>
-      <button data-view="outreach">Линк билдинг</button>
-      <button data-view="settings">Настройки</button>
+      <button data-view="audit" data-jp="監査">Одит на сайт</button>
+      <button data-view="ranks" data-jp="順位">Позиции в Google</button>
+      <button data-view="gsc" data-jp="検索">Search Console</button>
+      <button data-view="outreach" data-jp="連携">Линк билдинг</button>
+      <button data-view="settings" data-jp="設定">Настройки</button>
     </nav>
     <div class="textsize" role="group" aria-label="Размер на текста">
       <span>Текст</span>
@@ -24,6 +24,8 @@
       <button class="small" id="fs-up" aria-label="По-голям текст">A+</button>
     </div>
   </header>
+  <div class="kanji-bg" aria-hidden="true"><span id="kanji"></span><small>忍・明瞭・検索最適化</small></div>
+  <div class="ninja-bg" aria-hidden="true"></div>
   <main id="app" tabindex="-1"></main>
   <div id="live" class="sr-only" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>

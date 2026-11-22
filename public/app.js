@@ -34,6 +34,8 @@ async function api(path, opts = {}) {
 function render(...nodes) { app.replaceChildren(...nodes); app.focus({ preventScroll: true }); window.scrollTo(0, 0); }
 const errorBox = (msg) => h('div', { class: 'error-box', role: 'alert' }, msg);
 const eyebrow = (t, boxed) => h('span', { class: 'eyebrow' + (boxed ? ' boxed' : '') }, t);
+const healthTone = (x) => (x >= 80 ? '' : x >= 50 ? 'mid' : 'bad');
+const ring = (pct, small) => h('div', { class: ['ring', healthTone(pct), small ? 'small' : ''].filter(Boolean).join(' '), style: `--p:${pct}`, role: 'img', 'aria-label': `Здраве ${pct}%` }, h('span', {}, pct + '%'));
 const link = (url) => h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', class: 'url' }, url);
 
 // ---------- размер на текста ----------
@@ -46,11 +48,15 @@ document.getElementById('fs-down').onclick = () => setFs(parseFloat(getComputedS
 // ---------- навигация ----------
 document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => (location.hash = b.dataset.view)));
 const views = { audit: auditHome, ranks: ranksHome, gsc: gscView, links: gscView, outreach: outreachView, settings: settingsView };
+// японски украси (само декор, скрити от екранните четци)
+const KANJI = { audit: '監査', ranks: '順位', gsc: '検索', links: '検索', outreach: '連携', settings: '設定' };
 let activeStream = null;
 function route() {
   activeStream?.close(); activeStream = null;
   const [view = 'audit', ...rest] = location.hash.slice(1).split('/');
   document.querySelectorAll('nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false'));
+  document.body.dataset.view = view;
+  document.getElementById('kanji').textContent = KANJI[view] || KANJI.audit;
   (views[view] || auditHome)(...rest);
 }
 window.addEventListener('hashchange', route);
@@ -107,8 +113,8 @@ async function auditHome(id, tab) {
     const audits = await api('/audits');
     list.replaceChildren(...(audits.length ? audits.map((a) => h('div', { class: 'card' },
       h('div', { class: 'issue-head' },
-        h('h3', {}, new URL(a.url).hostname),
-        h('span', { class: 'sev ' + (a.summary.health >= 80 ? 'ok' : a.summary.health >= 50 ? 'warning' : 'error') }, `Здраве ${a.summary.health}%`)),
+        ring(a.summary.health, true),
+        h('h3', {}, new URL(a.url).hostname)),
       h('p', { class: 'muted' }, `${fmtDate(a.at)} · ${num(a.summary.htmlPages)} страници · ${num(a.summary.errors)} грешки · ${num(a.summary.warnings)} предупреждения${a.stopped ? ' · спрян преди края' : ''}`),
       h('div', { class: 'actions' },
         h('button', { onclick: () => (location.hash = 'audit/' + a.id) }, 'Отвори'),
@@ -123,7 +129,7 @@ async function auditReport(id, tab = 'issues') {
   try { r = await api('/audits/' + id); } catch (ex) { return render(errorBox(ex.message)); }
   const s = r.summary;
   const host = new URL(r.site.startUrl).hostname;
-  const tile = (n, lbl, cls) => h('div', { class: 'tile' }, h('div', { class: 'num ' + (cls || '') }, n), h('div', { class: 'lbl' }, lbl));
+  const tile = (n, lbl, tone) => h('div', { class: 'tile' + (tone ? ' t-' + tone : '') }, h('div', { class: 'num' }, n), h('div', { class: 'lbl' }, lbl));
   const tabs = h('div', { class: 'filters', role: 'group', 'aria-label': 'Изглед' },
     h('button', { 'aria-pressed': String(tab === 'issues'), onclick: () => (location.hash = `audit/${id}/issues`) }, 'Проблеми'),
     h('button', { 'aria-pressed': String(tab === 'pages'), onclick: () => (location.hash = `audit/${id}/pages`) }, 'Всички страници'));
@@ -139,11 +145,11 @@ async function auditReport(id, tab = 'issues') {
     h('h1', {}, host),
     h('p', { class: 'muted' }, fmtDate(r.site.finishedAt)),
     h('div', { class: 'tiles' },
-      tile(s.health + '%', 'Здраве (страници без грешки)', s.health >= 80 ? 'up' : s.health >= 50 ? '' : 'down'),
+      h('div', { class: 'tile health ' + healthTone(s.health) }, ring(s.health), h('div', {}, h('div', { class: 'num' }, s.health >= 80 ? 'Добро' : s.health >= 50 ? 'Средно' : 'Слабо'), h('div', { class: 'lbl' }, 'Здраве (страници без грешки)'))),
       tile(num(s.htmlPages), 'Страници'),
-      tile(num(s.errors), '✖ Грешки'),
-      tile(num(s.warnings), '⚠ Предупреждения'),
-      tile(num(s.notices), 'ℹ Съвети'),
+      tile(num(s.errors), '✖ Грешки', s.errors ? 'error' : 'muted'),
+      tile(num(s.warnings), '⚠ Предупреждения', s.warnings ? 'warning' : 'muted'),
+      tile(num(s.notices), 'ℹ Съвети', s.notices ? 'notice' : 'muted'),
       tile(s.avgMs != null ? (s.avgMs / 1000).toFixed(1) + ' с' : '–', 'Средно време за отговор')),
     notes.length ? h('div', { class: 'notice-box' }, notes.map((n) => h('p', {}, n))) : null,
     tabs,
@@ -384,7 +390,7 @@ async function rankProject(id) {
       const hist = p.history.slice(-6).map((hh) => posFmt(hh.results[k]?.position));
       const gscRes = r.source === 'gsc';
       return h('div', { class: 'card' }, h('div', { class: 'kw' },
-        h('div', { class: 'pos' }, r.error ? h('div', { class: 'n none down' }, 'Грешка')
+        h('div', { class: 'pos' + (r.position ? (r.position <= 3 ? ' top3' : r.position <= 10 ? ' top10' : r.position <= 30 ? ' top30' : '') : '') }, r.error ? h('div', { class: 'n none down' }, 'Грешка')
           : r.position ? [h('div', { class: 'n' }, posFmt(r.position)), h('div', { class: 'muted' }, gscRes ? 'средно място' : 'място')]
           : h('div', { class: 'n none' }, gscRes ? 'Няма импресии' : `Няма в топ ${p.depth}`)),
         h('div', {},
@@ -394,8 +400,7 @@ async function rankProject(id) {
           gscRes && r.impressions ? h('p', { class: 'muted' }, `${num(r.clicks)} клика · ${num(r.impressions)} импресии за последните ${r.days || 7} дни${r.days === 28 ? ' (за 7 дни няма данни)' : ''}`) : null,
           r.url ? h('p', {}, link(r.url)) : null,
           !gscRes && p.competitors.length ? h('p', { class: 'muted' }, 'Конкуренти: ', p.competitors.map((c) => `${c} ${r.competitors?.[c] ? '№' + r.competitors[c].position : '–'}`).join(' · ')) : null,
-          r.top?.length ? h('details', {}, h('summary', { class: 'muted' }, '▸ Първите 10 в Google'),
-            h('ul', { class: 'items' }, r.top.map((t) => h('li', {}, h('b', {}, t.position + '. '), t.title, h('span', { class: 'detail' }, link(t.link)))))) : null)));
+          r.top?.length ? serpCompare(k, r, p) : null)));
     }));
   };
   const sortBtns = [['pos', 'По позиция'], ['change', 'По промяна'], ['abc', 'По азбучен ред']].map(([v, t]) => h('button', { 'aria-pressed': String(v === sort), 'data-s': v, onclick: () => { sort = v; sortBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.s === v))); draw(); } }, t));
@@ -414,6 +419,148 @@ async function rankProject(id) {
     h('div', { class: 'filters', role: 'group', 'aria-label': 'Подреди' }, sortBtns),
     list);
   draw();
+}
+
+// ---------- преглед на първите 10 в Google и сравнение с твоята страница ----------
+const fmtDay = (s) => { if (!s) return null; const d = new Date(s); return isNaN(d) ? null : d.toLocaleDateString('bg-BG', { year: 'numeric', month: 'short', day: 'numeric' }); };
+const median = (xs) => { const a = xs.filter((x) => x != null).sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
+const yes = (x) => x >= 0.99; // всички думи на заявката са там
+const part = (x) => x >= 0.5 && x < 0.99; // поне половината думи
+
+async function poolMap(items, size, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => { while (i < items.length) { const k = i++; await fn(items[k], k); } }));
+}
+
+function peekView(d) {
+  const chip = (t, cls) => h('span', { class: 'chip' + (cls ? ' ' + cls : '') }, t);
+  const kwChip = (x, label) => yes(x) ? chip('✔ ' + label, 'good') : part(x) ? chip('◐ частично ' + label, 'half') : chip('✖ ' + label, 'bad');
+  const date = fmtDay(d.schema.modified) || fmtDay(d.schema.published);
+  const h2 = d.h2.length ? h('details', { class: 'h2list' }, h('summary', {}, `Подзаглавия H2 (${num(d.h2Count)})`),
+    h('ol', {}, d.h2.map((x) => h('li', {}, x))), d.h2Count > d.h2.length ? h('p', { class: 'muted' }, `…и още ${num(d.h2Count - d.h2.length)}`) : null) : null;
+  return h('div', { class: 'peek-body' },
+    h('dl', { class: 'facts' },
+      h('dt', {}, 'Заглавие (title)'), h('dd', {}, d.title ? `${d.title} (${d.title.length} знака)` : h('span', { class: 'down' }, 'няма')),
+      h('dt', {}, 'H1'), h('dd', {}, d.h1.length ? d.h1.join(' | ') : h('span', { class: 'down' }, 'няма')),
+      h('dt', {}, 'Описание'), h('dd', {}, d.metaDesc ? `${d.metaDesc} (${d.metaDesc.length} знака)` : h('span', { class: 'muted' }, 'няма (Google си прави сам)'))),
+    h2,
+    h('div', { class: 'chips' },
+      chip(`${num(d.words)} думи`),
+      chip(`${num(d.h2Count)} H2 · ${num(d.h3Count)} H3`),
+      d.schema.types.length ? chip('Schema: ' + d.schema.types.slice(0, 4).join(', ')) : chip('без структурирани данни', 'dim'),
+      date ? chip((d.schema.modified ? 'Обновена ' : 'Публикувана ') + date) : null,
+      d.schema.rating?.value ? chip(`★ ${d.schema.rating.value}${d.schema.rating.count ? ` (${num(d.schema.rating.count)})` : ''}`) : null,
+      chip(`${num(d.images)} картинки`),
+      d.videos ? chip(`${num(d.videos)} видео`) : null,
+      d.tables ? chip(`${num(d.tables)} таблици`) : null,
+      d.faq ? chip('ЧЗВ / въпроси') : null,
+      chip(`${num(d.internal)} вътр. · ${num(d.external)} външни линка`),
+      chip(`${(d.ms / 1000).toFixed(1)} с отговор`),
+      d.noindex ? chip('noindex', 'bad') : null),
+    d.kw ? h('div', { class: 'chips' },
+      h('span', { class: 'muted chips-lbl' }, 'Ключовата дума:'),
+      kwChip(d.kw.title, 'в заглавието'), kwChip(d.kw.h1, 'в H1'), kwChip(d.kw.url, 'в адреса'), kwChip(d.kw.desc, 'в описанието'),
+      chip(`${num(d.kw.h2)} H2 с нея`), chip(`точната фраза ${num(d.kw.exact)} пъти`)) : null);
+}
+
+function compareBox(kw, mine, others, depth) {
+  const box = h('div', { class: 'compare card' });
+  const ok = others.filter((d) => d && !d.approx);
+  const skipped = others.filter((d) => d?.approx).length;
+  if (!ok.length) { if (skipped) box.append(h('h3', {}, 'Сравнение'), h('p', { class: 'muted' }, `Google не даде точните адреси на резултатите (${skipped}), а само домейните, затова няма с какво да се сравни. Пусни нова проверка: тя ще запише точните адреси.`)); return box; }
+  const share = (f) => ok.filter(f).length;
+  const typeCount = {};
+  for (const d of ok) for (const t of new Set(d.schema.types)) typeCount[t] = (typeCount[t] || 0) + 1;
+  const commonTypes = Object.entries(typeCount).filter(([, n]) => n >= Math.max(2, ok.length * 0.3)).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} (${n})`);
+  const mWords = median(ok.map((d) => d.words)), mH2 = median(ok.map((d) => d.h2Count)), mImg = median(ok.map((d) => d.images));
+  const mark = (v) => (v ? '✔ да' : '✖ не');
+  const mark3 = (x) => (yes(x) ? '✔ да' : part(x) ? '◐ частично' : '✖ не');
+  const kwShare = (k) => { const full = share((d) => yes(d.kw[k])), half = share((d) => part(d.kw[k])); return `${full} от ${ok.length}` + (half ? ` (+${half} частично)` : ''); };
+  const rows = [
+    ['Думи в текста', mine ? num(mine.words) : '–', `~${num(mWords)} (медиана)`],
+    ['Подзаглавия H2', mine ? num(mine.h2Count) : '–', `~${num(mH2)}`],
+    ['Картинки', mine ? num(mine.images) : '–', `~${num(mImg)}`],
+    ['Думата в заглавието', mine?.kw ? mark3(mine.kw.title) : '–', kwShare('title')],
+    ['Думата в H1', mine?.kw ? mark3(mine.kw.h1) : '–', kwShare('h1')],
+    ['Думата в адреса', mine?.kw ? mark3(mine.kw.url) : '–', kwShare('url')],
+    ['Структурирани данни', mine ? (mine.schema.types.slice(0, 4).join(', ') || 'няма') : '–', commonTypes.join(', ') || 'рядко'],
+    ['С ЧЗВ / въпроси', mine ? mark(mine.faq) : '–', `${share((d) => d.faq)} от ${ok.length}`],
+  ];
+  const tips = [];
+  if (mine) {
+    if (mWords && mine.words < mWords * 0.7) tips.push(`Текстът ти е по-кратък: ${num(mine.words)} срещу около ${num(mWords)} думи при първите 10. Добави раздели, които те покриват, а ти не.`);
+    if (mine.kw && !yes(mine.kw.title) && share((d) => yes(d.kw.title)) >= ok.length * 0.6) tips.push('Повечето от първите 10 имат думата в заглавието (title), а ти нямаш.');
+    if (mine.kw && !yes(mine.kw.h1) && share((d) => yes(d.kw.h1)) >= ok.length * 0.5) tips.push('Сложи думата и в H1: така правят повечето от първите 10.');
+    if (mH2 && mine.h2Count < mH2 * 0.6) tips.push(`Имаш по-малко подзаглавия H2 (${num(mine.h2Count)} срещу ~${num(mH2)}). Виж подзаглавията им отдолу: това са темите, които Google очаква.`);
+    const missing = Object.entries(typeCount).filter(([t, n]) => n >= ok.length * 0.4 && !mine.schema.types.includes(t)).map(([t]) => t);
+    if (missing.length) tips.push(`Често срещани структурирани данни, които липсват при теб: ${missing.join(', ')}.`);
+    if (share((d) => d.faq) >= ok.length * 0.4 && !mine.faq) tips.push('Много от първите 10 имат раздел с въпроси и отговори (ЧЗВ).');
+    if (!tips.length) tips.push('По тези показатели страницата ти е наравно с първите 10. Разликата вероятно е в обратните линкове, авторитета на сайта или в това колко добре текстът отговаря на търсенето.');
+  }
+  box.append(...[
+    h('h3', {}, mine ? 'Твоята страница срещу първите 10' : `Какво общо имат първите 10`),
+    skipped ? h('p', { class: 'muted' }, `Сравнението е по ${ok.length} страници. ${skipped} резултата са пропуснати, защото Google даде само домейна им, а не точната страница.`) : null,
+    !mine ? h('p', { class: 'muted' }, `Сайтът ти не е в първите ${depth} за „${kw}“. Въведи адреса на твоята страница по темата отгоре, за да ги сравниш.`) : null,
+    h('div', { class: 'cmp-table', role: 'table', 'aria-label': 'Сравнение' },
+      h('div', { class: 'cmp-row cmp-head', role: 'row' }, h('span', { role: 'columnheader' }, 'Показател'), h('span', { role: 'columnheader' }, 'Твоята'), h('span', { role: 'columnheader' }, 'Първите 10')),
+      rows.map(([a, b, c]) => h('div', { class: 'cmp-row', role: 'row' }, h('span', { role: 'rowheader' }, a), h('span', { role: 'cell' }, b), h('span', { role: 'cell' }, c)))),
+    tips.length ? h('div', { class: 'explain' }, h('p', {}, h('b', {}, 'Какво да подобриш:')), h('ul', {}, tips.map((t) => h('li', {}, t)))) : null].filter(Boolean));
+  return box;
+}
+
+function serpCompare(kw, r, p) {
+  const det = h('details', { class: 'serp' });
+  const body = h('div');
+  det.append(h('summary', { class: 'muted' }, h('span', { class: 'serp-sum' }, 'Първите 10 в Google: заглавия, H1 и сравнение')), body);
+  let loaded = false;
+  det.addEventListener('toggle', () => { if (det.open && !loaded) { loaded = true; build(); } });
+
+  function build() {
+    const results = new Array(r.top.length).fill(null);
+    let mine = null;
+    const cmpSlot = h('div');
+    const redraw = () => cmpSlot.replaceChildren(compareBox(kw, mine, results, p.depth));
+    const mineUrl = h('input', { type: 'url', id: 'mine-' + kw.replace(/\W+/g, '-'), placeholder: 'https://твоят-сайт.bg/страница', value: r.url || '' });
+    const mineSlot = h('div');
+    const loadMine = async () => {
+      const u = mineUrl.value.trim(); if (!u) return;
+      mineSlot.replaceChildren(h('p', { class: 'muted' }, 'Отварям твоята страница…'));
+      try {
+        mine = await api(`/peek?url=${encodeURIComponent(u)}&kw=${encodeURIComponent(kw)}`);
+        mineSlot.replaceChildren(h('div', { class: 'serp-item mine' }, h('div', { class: 'serp-head' }, h('span', { class: 'serp-pos' }, r.position ? '№' + posFmt(r.position) : 'ТИ'), h('div', {}, h('b', {}, 'Твоята страница'), h('span', { class: 'detail' }, link(mine.finalUrl)))), peekView(mine)));
+      } catch (ex) { mine = null; mineSlot.replaceChildren(errorBox(ex.message)); }
+      redraw();
+    };
+    const list = h('ol', { class: 'serp-list' }, r.top.map((t, i) => {
+      const slot = h('div', { class: 'peek-slot' }, h('p', { class: 'muted loading' }, 'Отварям страницата…'));
+      const own = r.url && t.link === r.url;
+      const approx = t.approx || (t.approx === undefined && /^https?:\/\/[^/]+\/$/.test(t.link));
+      const item = h('li', { class: 'serp-item' + (own ? ' mine' : '') },
+        h('div', { class: 'serp-head' },
+          h('span', { class: 'serp-pos', 'aria-label': `Място ${t.position}` }, String(t.position)),
+          h('div', {},
+            h('h4', {}, t.title || t.link, own ? h('span', { class: 'sev ok' }, 'твоята') : null),
+            h('span', { class: 'detail' }, link(t.link)),
+            t.snippet ? h('p', { class: 'snippet' }, t.snippet) : null,
+            approx ? h('p', { class: 'muted snippet' }, 'ℹ Google не даде точния адрес, а само домейна. Ако резултатът е вътрешна страница, прегледът тук е на началната страница на сайта.') : null)),
+        slot);
+      item._load = async () => {
+        try { results[i] = { ...(await api(`/peek?url=${encodeURIComponent(t.link)}&kw=${encodeURIComponent(kw)}`)), approx }; slot.replaceChildren(peekView(results[i])); }
+        catch (ex) { slot.replaceChildren(h('p', { class: 'muted' }, '✖ Не успях да отворя страницата: ' + ex.message)); }
+        redraw();
+      };
+      return item;
+    }));
+    body.replaceChildren(
+      h('form', { class: 'mine-form', onsubmit: (e) => { e.preventDefault(); loadMine(); } },
+        h('label', { for: mineUrl.id }, 'Твоята страница за сравнение', h('span', { class: 'hint' }, r.url ? 'Това е страницата, с която се класираш. Може да я смениш.' : 'Сайтът ти не е в резултатите. Въведи страницата, която искаш да класираш за тази дума.')),
+        h('div', { class: 'row' }, mineUrl, h('button', { type: 'submit' }, 'Сравни'))),
+      mineSlot, cmpSlot, list);
+    say('Зареждам първите 10 резултата');
+    if (r.url) loadMine();
+    poolMap([...list.children], 3, (li) => li._load()).then(() => say('Прегледът е готов'));
+  }
+  return det;
 }
 
 // =====================================================================

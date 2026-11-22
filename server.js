@@ -10,6 +10,7 @@ import * as ranks from './src/ranks.js';
 import * as outreach from './src/outreach.js';
 import * as gsc from './src/gsc.js';
 import * as scheduler from './src/scheduler.js';
+import { peek } from './src/peek.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUB = path.join(ROOT, 'public');
@@ -19,7 +20,19 @@ const PORT = Number(process.env.PORT) || 4321;
 ranks.setDataDir(DATA);
 outreach.setDataDir(DATA);
 gsc.setDataDir(DATA);
+// Входът в Google се връща на този адрес: той е записан в Google Cloud, затова не се сменя.
 const REDIRECT = `http://localhost:${PORT}`;
+
+// Име на приложението в адреса на браузъра. Браузърите сами насочват всеки *.localhost
+// към този компютър (RFC 6761), така че не е нужен hosts файл или DNS сървър.
+// YASNO_HOST=localhost изключва името; YASNO_WEB_PORT=0 изключва порт 80.
+const APP_HOST = (process.env.YASNO_HOST || 'yasno.seo.localhost').toLowerCase();
+const WEB_PORT = process.env.YASNO_WEB_PORT != null ? Number(process.env.YASNO_WEB_PORT) : 80;
+let appUrl = `http://${APP_HOST}:${PORT}`; // става без порт, ако порт 80 е свободен
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const HOST_RE = new RegExp(`^(localhost|127\\.0\\.0\\.1|${esc(APP_HOST)})(:\\d+)?$`, 'i');
+const ORIGIN_RE = new RegExp(`^http://(localhost|127\\.0\\.0\\.1|${esc(APP_HOST)})(:\\d+)?$`, 'i');
+const isPlainLocal = (host) => /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host || '');
 
 async function rawBody(req, limit = 50 * 1024 * 1024) {
   const chunks = []; let n = 0;
@@ -95,6 +108,12 @@ async function api(req, res, url) {
   }
   if (a === 'jobs' && b && c === 'stop' && M === 'POST') {
     jobs.get(b)?.ctrl.abort(); return json(res, 200, { ok: true });
+  }
+
+  // преглед на страница от резултатите в Google
+  if (a === 'peek' && M === 'GET') {
+    try { return json(res, 200, await peek(url.searchParams.get('url') || '', (url.searchParams.get('kw') || '').slice(0, 200))); }
+    catch (e) { return json(res, 422, { error: e.name === 'AbortError' ? 'Сайтът не отговори навреме' : e.message }); }
   }
 
   // одит
@@ -243,31 +262,50 @@ async function serveStatic(req, res, url) {
   } catch { res.writeHead(404); res.end('Не е намерено'); }
 }
 
-const server = http.createServer(async (req, res) => {
+async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  // защита: приемаме само заявки към localhost
-  if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) { res.writeHead(403); return res.end(); }
+  // защита: приемаме само заявки към localhost и към името на приложението
+  if (!HOST_RE.test(req.headers.host || '')) { res.writeHead(403); return res.end(); }
   try {
     if (url.pathname.startsWith('/api/')) {
-      if (req.method !== 'GET' && req.headers.origin && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.origin)) { res.writeHead(403); return res.end(); }
+      if (req.method !== 'GET' && req.headers.origin && !ORIGIN_RE.test(req.headers.origin)) { res.writeHead(403); return res.end(); }
       return await api(req, res, url);
     }
-    // връщане от входа в Google
+    const toApp = isPlainLocal(req.headers.host) && APP_HOST !== 'localhost';
+    // връщане от входа в Google (той винаги се връща на localhost:4321)
     if (url.pathname === '/' && url.searchParams.get('state') && (url.searchParams.get('code') || url.searchParams.get('error'))) {
-      try { await gsc.handleCallback(url.searchParams); res.writeHead(302, { location: '/#gsc' }); return res.end(); }
-      catch (e) { res.writeHead(302, { location: '/#gsc/error/' + encodeURIComponent(e.message) }); return res.end(); }
+      const back = toApp ? appUrl + '/' : '/';
+      try { await gsc.handleCallback(url.searchParams); res.writeHead(302, { location: back + '#gsc' }); return res.end(); }
+      catch (e) { res.writeHead(302, { location: back + '#gsc/error/' + encodeURIComponent(e.message) }); return res.end(); }
+    }
+    // отворено като localhost: прехвърляме към адреса с името на приложението
+    if (toApp && req.method === 'GET' && url.pathname === '/') {
+      res.writeHead(302, { location: appUrl + '/' + url.search, 'cache-control': 'no-store' }); return res.end();
     }
     return await serveStatic(req, res, url);
   } catch (e) {
     if (!res.headersSent) json(res, 500, { error: e.message }); else res.end();
   }
-});
+}
+const server = http.createServer(handle);
+
+// Втори вход на порт 80, за да е адресът без номер на порт: http://yasno.seo.localhost
+function listenWeb() {
+  if (!WEB_PORT || WEB_PORT === PORT || APP_HOST === 'localhost') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const web = http.createServer(handle);
+    web.once('error', () => resolve(false)); // порт 80 е зает или забранен: оставаме с номер на порт
+    web.listen(WEB_PORT, '127.0.0.1', () => resolve(true));
+  });
+}
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') { console.log(`\n  Ясно SEO вече работи: http://localhost:${PORT}\n`); process.exit(3); }
   throw e;
 });
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`\n  [${new Date().toLocaleString('bg-BG')}] Ясно SEO работи:  http://localhost:${PORT}\n  За спиране натисни Ctrl+C\n`);
+server.listen(PORT, '127.0.0.1', async () => {
+  if (await listenWeb()) appUrl = `http://${APP_HOST}` + (WEB_PORT === 80 ? '' : ':' + WEB_PORT);
+  else if (APP_HOST === 'localhost') appUrl = `http://localhost:${PORT}`;
+  console.log(`\n  [${new Date().toLocaleString('bg-BG')}] Ясно SEO работи:  ${appUrl}\n  (работи и на http://localhost:${PORT})\n  За спиране натисни Ctrl+C\n`);
   scheduler.start({ dataDir: DATA, root: ROOT, audit: (u, max) => runAudit(u, max) });
 });
