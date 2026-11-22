@@ -26,9 +26,15 @@ const REDIRECT = `http://localhost:${PORT}`;
 // Име на приложението в адреса на браузъра. Браузърите сами насочват всеки *.localhost
 // към този компютър (RFC 6761), така че не е нужен hosts файл или DNS сървър.
 // YASNO_HOST=localhost изключва името; YASNO_WEB_PORT=0 изключва порт 80.
-const APP_HOST = (process.env.YASNO_HOST || 'yasno.seo.localhost').toLowerCase();
+// YASNO_URL задава адреса ръчно (нужно в Docker, ако външният порт е друг, например http://yasno.seo.localhost:8080).
+const FIXED_URL = (process.env.YASNO_URL || '').replace(/\/+$/, '');
+const APP_HOST = (process.env.YASNO_HOST || (FIXED_URL ? new URL(FIXED_URL).hostname : 'yasno.seo.localhost')).toLowerCase();
 const WEB_PORT = process.env.YASNO_WEB_PORT != null ? Number(process.env.YASNO_WEB_PORT) : 80;
-let appUrl = `http://${APP_HOST}:${PORT}`; // става без порт, ако порт 80 е свободен
+let appUrl = FIXED_URL || `http://${APP_HOST}:${PORT}`; // става без порт, ако порт 80 е свободен
+// В Docker сървърът трябва да слуша на всички адреси на контейнера (YASNO_LISTEN=0.0.0.0);
+// навън е достъпен само ако портът е публикуван, а Host/Origin проверките остават.
+const LISTEN = process.env.YASNO_LISTEN || '127.0.0.1';
+const IN_DOCKER = process.env.YASNO_DOCKER === '1';
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const HOST_RE = new RegExp(`^(localhost|127\\.0\\.0\\.1|${esc(APP_HOST)})(:\\d+)?$`, 'i');
 const ORIGIN_RE = new RegExp(`^http://(localhost|127\\.0\\.0\\.1|${esc(APP_HOST)})(:\\d+)?$`, 'i');
@@ -179,7 +185,8 @@ async function api(req, res, url) {
     const index = await readIndex();
     const sites = [...new Map(index.map((x) => [x.url, x])).keys()];
     return json(res, 200, {
-      autostart: await scheduler.autostartEnabled(),
+      autostart: IN_DOCKER ? false : await scheduler.autostartEnabled(),
+      container: IN_DOCKER,
       ranks: projects.map((p) => ({ id: p.id, name: p.name, domain: p.domain, source: p.source || 'serpapi', schedule: p.schedule || 'off', maxCost: ranks.maxCost(p), keywords: p.keywords.length, lastRun: p.history.at(-1)?.at || null })),
       audits: await scheduler.auditSchedules(), auditSites: sites,
       events: await scheduler.events(),
@@ -197,6 +204,7 @@ async function api(req, res, url) {
     try { await ranks.upsertProject({ ...p, schedule }); return json(res, 200, { ok: true }); } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (a === 'schedule' && b === 'autostart' && M === 'POST') {
+    if (IN_DOCKER) return json(res, 400, { error: 'В Docker приложението тръгва само заедно с Docker (restart: unless-stopped)' });
     try { await scheduler.setAutostart(!!(await body(req)).enabled); return json(res, 200, { ok: true }); } catch (e) { return json(res, 400, { error: e.message }); }
   }
 
@@ -295,7 +303,7 @@ function listenWeb() {
   return new Promise((resolve) => {
     const web = http.createServer(handle);
     web.once('error', () => resolve(false)); // порт 80 е зает или забранен: оставаме с номер на порт
-    web.listen(WEB_PORT, '127.0.0.1', () => resolve(true));
+    web.listen(WEB_PORT, LISTEN, () => resolve(true));
   });
 }
 
@@ -303,9 +311,13 @@ server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') { console.log(`\n  Ясно SEO вече работи: http://localhost:${PORT}\n`); process.exit(3); }
   throw e;
 });
-server.listen(PORT, '127.0.0.1', async () => {
-  if (await listenWeb()) appUrl = `http://${APP_HOST}` + (WEB_PORT === 80 ? '' : ':' + WEB_PORT);
-  else if (APP_HOST === 'localhost') appUrl = `http://localhost:${PORT}`;
-  console.log(`\n  [${new Date().toLocaleString('bg-BG')}] Ясно SEO работи:  ${appUrl}\n  (работи и на http://localhost:${PORT})\n  За спиране натисни Ctrl+C\n`);
+server.listen(PORT, LISTEN, async () => {
+  const web = await listenWeb();
+  if (!FIXED_URL) {
+    if (web) appUrl = `http://${APP_HOST}` + (WEB_PORT === 80 ? '' : ':' + WEB_PORT);
+    else if (APP_HOST === 'localhost') appUrl = `http://localhost:${PORT}`;
+  }
+  console.log(`\n  [${new Date().toLocaleString('bg-BG')}] Ясно SEO работи:  ${appUrl}\n` +
+    (IN_DOCKER ? '  (в Docker; спиране: docker compose stop)\n' : `  (работи и на http://localhost:${PORT})\n  За спиране натисни Ctrl+C\n`));
   scheduler.start({ dataDir: DATA, root: ROOT, audit: (u, max) => runAudit(u, max) });
 });

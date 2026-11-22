@@ -1,0 +1,14 @@
+# Не влизат в образа: данни с ключове, зависимости от хоста, файлове само за Windows
+data
+node_modules
+.git
+.gitignore
+*.log
+*.bat
+*.vbs
+scripts
+assets
+README.md
+Dockerfile
+compose.yaml
+.dockerignore

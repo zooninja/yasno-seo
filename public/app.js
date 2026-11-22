@@ -961,10 +961,14 @@ async function loadAuto() {
     try { await api('/schedule/autostart', { method: 'POST', body: { enabled: auto.checked } }); ok(autoMsg, auto.checked ? 'Ще тръгва при влизане в Windows' : 'Изключено'); }
     catch (ex) { auto.checked = !auto.checked; autoMsg.replaceChildren(errorBox(ex.message)); }
   } });
-  const startCard = h('div', { class: 'card' },
-    h('label', { class: 'check', for: 's-autostart', style: 'margin-top:0' }, auto, 'Пускай приложението скрито при влизане в Windows'),
-    h('p', { class: 'muted' }, 'Нужно е, за да работят автоматичните проверки. Отваряш го както досега, с „Старт Ясно SEO.bat“ или на адрес localhost:4321.'),
-    autoMsg);
+  const startCard = d.container
+    ? h('div', { class: 'card' },
+      h('h3', {}, 'Работи в Docker'),
+      h('p', { class: 'muted' }, 'Приложението тръгва само заедно с Docker, затова автоматичните проверки работят, докато контейнерът е пуснат. Спира се с „docker compose stop“.'))
+    : h('div', { class: 'card' },
+      h('label', { class: 'check', for: 's-autostart', style: 'margin-top:0' }, auto, 'Пускай приложението скрито при влизане в Windows'),
+      h('p', { class: 'muted' }, 'Нужно е, за да работят автоматичните проверки. Отваряш го както досега, с иконата, „Старт Ясно SEO.bat“ или на адрес yasno.seo.localhost.'),
+      autoMsg);
 
   // позиции
   const rankRows = d.ranks.map((p) => {

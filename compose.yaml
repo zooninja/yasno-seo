@@ -1,0 +1,23 @@
+# Ясно SEO с Docker Compose.
+#   Пускане:   docker compose up -d --build
+#   Отваряне:  http://yasno.seo.localhost  (или http://localhost:4321)
+#   Спиране:   docker compose stop
+services:
+  yasno-seo:
+    build: .
+    image: yasno-seo:latest
+    container_name: yasno-seo
+    restart: unless-stopped      # тръгва само заедно с Docker
+    ports:
+      # Само 127.0.0.1: приложението е достъпно единствено от този компютър.
+      - "127.0.0.1:4321:4321"    # не сменяй външния порт: входът в Google се връща на localhost:4321
+      - "127.0.0.1:80:80"        # за адреса без порт; ако 80 е зает, виж YASNO_URL отдолу
+    environment:
+      TZ: Europe/Sofia           # часова зона за графиците на проверките
+      # Ако публикуваш порт 80 като друг, например "127.0.0.1:8080:80", задай и:
+      # YASNO_URL: http://yasno.seo.localhost:8080
+    volumes:
+      - yasno-data:/app/data     # SerpApi ключ, вход в Google, проекти и одити
+
+volumes:
+  yasno-data:
